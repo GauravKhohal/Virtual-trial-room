@@ -1,0 +1,25 @@
+[
+  {
+    "id": "owner-1782826505463-169242",
+    "name": "lehnga",
+    "brand": "levis",
+    "type": "Lehenga",
+    "gender": "Female",
+    "price": 2000,
+    "color": "blue",
+    "colorHex": "#1b2a4a",
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "occasions": [
+      "Wedding",
+      "Festival",
+      "Traditional Function",
+      "Party"
+    ]
+  }
+]

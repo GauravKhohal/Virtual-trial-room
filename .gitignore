@@ -1,0 +1,34 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Secrets (Hugging Face token etc.) — never commit
+server/.env
+
+# Runtime-uploaded product photos and generated try-on results — live on
+# Railway's (non-persistent) container disk, not meant to be version
+# controlled. (.env.local is already covered by the *.local rule above.)
+server/uploads/*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+.vercel

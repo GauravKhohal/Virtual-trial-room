@@ -1,0 +1,7 @@
+# `railway up` uploads the local directory as-is, not respecting .gitignore —
+# without this, whatever test photos/results happen to be sitting in
+# uploads/ on the deploying machine get shipped to production along with
+# the code. Product photos should be added via the Owner Dashboard (or the
+# /api/products/:id/image endpoint directly) after each deploy instead.
+uploads/*
+.env

@@ -8,7 +8,31 @@ import type {
   Product,
   SelectionState,
   StoreVisitBooking,
+  TriedLook,
 } from '../types';
+
+// sessionStorage (not localStorage) deliberately — a customer's tried-on
+// looks should survive an accidental page reload during their own visit, but
+// clear automatically once their tablet session/tab ends, so the next
+// customer on the same tablet doesn't see a stranger's try-on photos.
+const TRIED_LOOKS_KEY = 'vtr_tried_looks';
+
+function loadTriedLooks(): TriedLook[] {
+  try {
+    const raw = sessionStorage.getItem(TRIED_LOOKS_KEY);
+    return raw ? (JSON.parse(raw) as TriedLook[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTriedLooks(looks: TriedLook[]) {
+  try {
+    sessionStorage.setItem(TRIED_LOOKS_KEY, JSON.stringify(looks));
+  } catch {
+    // sessionStorage unavailable (private mode, quota, etc.) — looks just won't survive a reload
+  }
+}
 
 interface AppContextValue {
   selection: SelectionState;
@@ -38,6 +62,13 @@ interface AppContextValue {
   // selected elsewhere in the app.
   pendingTryOn: { top?: Product; bottom?: Product } | null;
   setPendingTryOn: (items: { top?: Product; bottom?: Product } | null) => void;
+
+  // Every AI try-on the customer generates this visit, so they can compare a
+  // few garments before deciding rather than only ever seeing the latest one.
+  triedLooks: TriedLook[];
+  addTriedLook: (resultUrl: string, topProduct?: Product, bottomProduct?: Product) => void;
+  removeTriedLook: (id: string) => void;
+  clearTriedLooks: () => void;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -56,6 +87,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<StoreVisitBooking[]>([]);
   const [lastUploadedSelfie, setLastUploadedSelfie] = useState<string | null>(null);
   const [pendingTryOn, setPendingTryOn] = useState<{ top?: Product; bottom?: Product } | null>(null);
+  const [triedLooks, setTriedLooks] = useState<TriedLook[]>(loadTriedLooks);
 
   const setOccasion = (occasion: Occasion | null) => setSelection((s) => ({ ...s, occasion }));
   const setGender = (gender: Gender) => setSelection((s) => ({ ...s, gender, clothingTypes: [] }));
@@ -111,6 +143,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addBooking = (booking: StoreVisitBooking) => setBookings((prev) => [...prev, booking]);
 
+  const addTriedLook = (resultUrl: string, topProduct?: Product, bottomProduct?: Product) => {
+    setTriedLooks((prev) => {
+      const next = [...prev, { id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`, resultUrl, topProduct, bottomProduct, createdAt: Date.now() }];
+      saveTriedLooks(next);
+      return next;
+    });
+  };
+
+  const removeTriedLook = (id: string) => {
+    setTriedLooks((prev) => {
+      const next = prev.filter((l) => l.id !== id);
+      saveTriedLooks(next);
+      return next;
+    });
+  };
+
+  const clearTriedLooks = () => {
+    setTriedLooks([]);
+    saveTriedLooks([]);
+  };
+
   const value: AppContextValue = {
     selection,
     setOccasion,
@@ -132,6 +185,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLastUploadedSelfie,
     pendingTryOn,
     setPendingTryOn,
+    triedLooks,
+    addTriedLook,
+    removeTriedLook,
+    clearTriedLooks,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

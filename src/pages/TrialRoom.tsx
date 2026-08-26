@@ -79,6 +79,10 @@ export default function TrialRoomPage() {
     addToCart,
     pendingTryOn,
     setPendingTryOn,
+    triedLooks,
+    addTriedLook,
+    removeTriedLook,
+    clearTriedLooks,
   } = useApp();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const { productImages } = useOwner();
@@ -101,6 +105,7 @@ export default function TrialRoomPage() {
   const [topTypeFilter, setTopTypeFilter] = useState<ClothingType>('Shirt');
   const [bottomTypeFilter, setBottomTypeFilter] = useState<ClothingType>('Jeans');
   const [realTryOn, setRealTryOn] = useState<RealTryOnState>({ status: 'idle' });
+  const [viewingLookId, setViewingLookId] = useState<string | null>(null);
   const [mode, setMode] = useState<'live' | 'static'>('live');
   // A frame captured from Live Preview already has the garment baked into the
   // pixels — the manual drag-box tool below is only needed (and only sensible)
@@ -267,6 +272,10 @@ export default function TrialRoomPage() {
       }
 
       setRealTryOn({ status: 'done', resultUrl: currentPerson });
+      // Saved for the rest of the visit (see AppContext) so the customer can
+      // come back and compare this against other garments they try, instead
+      // of this result being gone the moment they generate the next one.
+      addTriedLook(currentPerson, topProduct ?? undefined, bottomProduct ?? undefined);
     } catch (err) {
       setRealTryOn({ status: 'error', error: err instanceof Error ? err.message : 'Something went wrong.' });
     }
@@ -318,6 +327,12 @@ export default function TrialRoomPage() {
     setEstimatedSize(null);
     topBox.reset();
     bottomBox.reset();
+    // A fresh selfie means a new customer (or the same one retaking their
+    // photo) — either way, past try-on results were generated against a
+    // photo that's no longer current, so don't carry them forward. This is
+    // also what keeps one customer's try-ons from bleeding into the next
+    // person's session on a shared tablet.
+    clearTriedLooks();
 
     setTimeout(() => {
       setBodyShape(BODY_SHAPES[sizeSeed % BODY_SHAPES.length]);
@@ -757,6 +772,39 @@ export default function TrialRoomPage() {
               <ZoomableImage src={realTryOn.resultUrl} alt="AI try-on result" />
             </div>
           )}
+
+          {triedLooks.length > 0 && (
+            <div className="mt-6">
+              <p className="text-xs font-semibold text-slate-700 mb-1">
+                👗 Your Try-Ons This Visit <span className="text-slate-400 font-normal">({triedLooks.length})</span>
+              </p>
+              <p className="text-[11px] text-slate-400 mb-2">
+                Saved for the rest of your visit — tap one to compare, then finalize whichever you like best.
+              </p>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {triedLooks.map((look) => (
+                  <div key={look.id} className="relative shrink-0 w-24">
+                    <button
+                      onClick={() => setViewingLookId(look.id)}
+                      className="block w-24 h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-100"
+                    >
+                      <img src={look.resultUrl} alt="Tried look" className="w-full h-full object-cover" />
+                    </button>
+                    <button
+                      onClick={() => removeTriedLook(look.id)}
+                      aria-label="Remove this try-on"
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900 text-white text-xs leading-none flex items-center justify-center hover:bg-rose-600"
+                    >
+                      ×
+                    </button>
+                    <p className="text-[10px] text-slate-500 mt-1 truncate">
+                      {[look.topProduct?.name, look.bottomProduct?.name].filter(Boolean).join(' + ') || 'Look'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
@@ -894,6 +942,46 @@ export default function TrialRoomPage() {
           </p>
         </div>
       </div>
+
+      {viewingLookId && (() => {
+        const look = triedLooks.find((l) => l.id === viewingLookId);
+        if (!look) return null;
+        const label = [look.topProduct?.name, look.bottomProduct?.name].filter(Boolean).join(' + ') || 'Look';
+        const totalPrice = (look.topProduct?.price ?? 0) + (look.bottomProduct?.price ?? 0);
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-slate-900/80 flex items-center justify-center p-4"
+            onClick={() => setViewingLookId(null)}
+          >
+            <div className="max-w-lg w-full bg-white rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-slate-800">{label}</p>
+                <button
+                  onClick={() => setViewingLookId(null)}
+                  aria-label="Close"
+                  className="text-slate-400 hover:text-slate-700 text-xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <ZoomableImage src={look.resultUrl} alt={label} />
+              <div className="flex items-center justify-between mt-4">
+                {totalPrice > 0 && <p className="text-sm font-semibold text-indigo-700">₹{totalPrice.toLocaleString('en-IN')}</p>}
+                <button
+                  onClick={() => {
+                    if (look.topProduct) addToCart(look.topProduct, look.topProduct.sizes[1], 1);
+                    if (look.bottomProduct) addToCart(look.bottomProduct, look.bottomProduct.sizes[1], 1);
+                    setViewingLookId(null);
+                  }}
+                  className="px-5 py-2 rounded-full bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                >
+                  Finalize This Look — Add to Cart
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

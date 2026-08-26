@@ -70,6 +70,17 @@ export interface StoreVisitBooking {
   createdAt: string;
 }
 
+// One AI try-on the customer generated in Trial Room — kept around for the
+// rest of their visit so they can compare a few garments (e.g. 3 shirts)
+// side by side before deciding, instead of only ever seeing the latest one.
+export interface TriedLook {
+  id: string;
+  resultUrl: string;
+  topProduct?: Product;
+  bottomProduct?: Product;
+  createdAt: number;
+}
+
 export interface SelectionState {
   occasion: Occasion | null;
   gender: Gender | null;

@@ -39,52 +39,15 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-function findExistingFile(productId) {
-  const match = fs.readdirSync(UPLOADS_DIR).find((f) => f.startsWith(`${productId}.`));
-  return match ? path.join(UPLOADS_DIR, match) : null;
-}
-
-// --- Product photo storage (real files on disk, not browser localStorage) ---
-
-app.get('/api/products/images', (_req, res) => {
-  const files = fs.readdirSync(UPLOADS_DIR);
-  const map = {};
-  for (const file of files) {
-    if (file.startsWith('custom-')) continue; // pasted-link garments, not tied to a product id
-    const productId = file.split('.')[0];
-    map[productId] = `/uploads/${file}`;
-  }
-  res.json(map);
-});
-
-app.post('/api/products/:productId/image', upload.single('photo'), (req, res) => {
-  const { productId } = req.params;
-  if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
-
-  const existing = findExistingFile(productId);
-  if (existing) fs.unlinkSync(existing);
-
-  const ext = (path.extname(req.file.originalname) || '.jpg').toLowerCase();
-  const filename = `${productId}${ext}`;
-  fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
-
-  res.json({ url: `/uploads/${filename}` });
-});
-
-app.delete('/api/products/:productId/image', (req, res) => {
-  const existing = findExistingFile(req.params.productId);
-  if (existing) fs.unlinkSync(existing);
-  res.json({ ok: true });
-});
-
-// --- Custom products (store owner's real catalog, added via Owner Dashboard) ---
-// --- Custom products — persisted in PostgreSQL so they survive redeployments ---
-// The old approach (a flat JSON file on the container's filesystem) caused products
-// to vanish every time the Railway service restarted or was redeployed, because
-// Railway containers start fresh from the deployed image with no runtime data
-// carried over. PostgreSQL (a free Railway plugin in the same project) is
-// persistent across restarts and redeployments — this fixes that permanently.
-
+// --- PostgreSQL (Railway plugin, same project) — the source of truth for
+// anything that needs to survive a redeploy. Railway containers start fresh
+// from the deployed image on every restart, and even a CLI `railway up`
+// re-ships whatever happens to be in the local uploads/ folder on the
+// deploying machine rather than preserving what's already live — a flat file
+// (or a file on disk generally) is not a reliable place to keep product
+// photos. (AI try-on RESULT images are the one thing that stays on disk —
+// they're single-use, shown once to the customer generating them, and don't
+// need to survive a restart the way a catalog photo does.)
 const { Pool } = pg;
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -95,14 +58,87 @@ const db = new Pool({
     : false,
 });
 
-// Create the table once on startup — idempotent, safe to run on every boot.
+// Create the tables once on startup — idempotent, safe to run on every boot.
 db.query(`
   CREATE TABLE IF NOT EXISTS custom_products (
     id TEXT PRIMARY KEY,
     product JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )
-`).catch((err) => console.error('[db] table init failed:', err));
+`).catch((err) => console.error('[db] custom_products table init failed:', err));
+
+db.query(`
+  CREATE TABLE IF NOT EXISTS product_images (
+    product_id TEXT PRIMARY KEY,
+    content_type TEXT NOT NULL,
+    data BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`).catch((err) => console.error('[db] product_images table init failed:', err));
+
+// --- Product photo storage (bytes in Postgres, not files on disk) ---
+
+app.get('/api/products/images', async (_req, res) => {
+  try {
+    const { rows } = await db.query('SELECT product_id FROM product_images');
+    const map = {};
+    for (const row of rows) map[row.product_id] = `/api/products/${row.product_id}/photo`;
+    res.json(map);
+  } catch (err) {
+    console.error('[products] images list failed:', err);
+    res.status(500).json({ error: 'Could not load product photos.' });
+  }
+});
+
+app.get('/api/products/:productId/photo', async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT content_type, data FROM product_images WHERE product_id = $1',
+      [req.params.productId]
+    );
+    if (rows.length === 0) return res.status(404).end();
+    res.set('Content-Type', rows[0].content_type);
+    // Product photos are replaced by re-uploading (new row, same id) rather
+    // than mutated in place, so this URL's content never changes — safe to
+    // cache aggressively.
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(rows[0].data);
+  } catch (err) {
+    console.error('[products] photo fetch failed:', err);
+    res.status(500).end();
+  }
+});
+
+app.post('/api/products/:productId/image', upload.single('photo'), async (req, res) => {
+  const { productId } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
+
+  try {
+    await db.query(
+      `INSERT INTO product_images (product_id, content_type, data, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (product_id) DO UPDATE SET content_type = $2, data = $3, updated_at = NOW()`,
+      [productId, req.file.mimetype, req.file.buffer]
+    );
+    res.json({ url: `/api/products/${productId}/photo` });
+  } catch (err) {
+    console.error('[products] photo upload failed:', err);
+    res.status(500).json({ error: 'Could not save photo.' });
+  }
+});
+
+app.delete('/api/products/:productId/image', async (req, res) => {
+  try {
+    await db.query('DELETE FROM product_images WHERE product_id = $1', [req.params.productId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[products] photo delete failed:', err);
+    res.status(500).json({ error: 'Could not delete photo.' });
+  }
+});
+
+// --- Custom products (store owner's real catalog, added via Owner Dashboard) ---
+// persisted in the same PostgreSQL instance, for the same reason as above.
 
 app.get('/api/custom-products', async (_req, res) => {
   try {
@@ -151,8 +187,7 @@ app.post('/api/custom-products', async (req, res) => {
 app.delete('/api/custom-products/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM custom_products WHERE id = $1', [req.params.id]);
-    const existingPhoto = findExistingFile(req.params.id);
-    if (existingPhoto) fs.unlinkSync(existingPhoto);
+    await db.query('DELETE FROM product_images WHERE product_id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     console.error('[custom-products] DELETE failed:', err);

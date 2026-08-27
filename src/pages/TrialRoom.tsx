@@ -775,9 +775,14 @@ export default function TrialRoomPage() {
 
           {triedLooks.length > 0 && (
             <div className="mt-6">
-              <p className="text-xs font-semibold text-slate-700 mb-1">
-                👗 Your Try-Ons This Visit <span className="text-slate-400 font-normal">({triedLooks.length})</span>
-              </p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold text-slate-700">
+                  👗 Your Try-Ons This Visit <span className="text-slate-400 font-normal">({triedLooks.length})</span>
+                </p>
+                <button onClick={clearTriedLooks} className="text-xs text-slate-400 font-medium hover:text-rose-600 hover:underline">
+                  Clear All
+                </button>
+              </div>
               <p className="text-[11px] text-slate-400 mb-2">
                 Saved for the rest of your visit — tap one to compare, then finalize whichever you like best.
               </p>
